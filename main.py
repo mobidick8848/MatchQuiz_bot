@@ -26,9 +26,9 @@ def load_questions_from_csv(path: str):
     with open(path, "r", encoding="utf-8") as f:
         reader = csv.DictReader(f)
         for row in reader:
-            q = (row.get("Вопрос") or "").strip()
-            opts = (row.get("Варианты ответов") or "").strip()
-            qtype = (row.get("Тип") or "single").strip().lower()
+            q = (row.get("question") or "").strip()
+            opts = (row.get("options") or "").strip()
+            qtype = (row.get("type") or "single").strip().lower()
             if not q or not opts: continue
             options = [o.strip() for o in opts.split(";") if o.strip()]
             if qtype not in ("single","multi"): qtype = "single"
