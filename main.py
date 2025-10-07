@@ -27,10 +27,12 @@ QUESTIONS_PATH = "questions.csv"
 SESSIONS_PATH = "sessions.json"
 
 def load_questions_from_csv(path: str):
+    import csv, re, os, random
+
     if not os.path.exists(path):
         return []
-    out = []
 
+    # ---- эмодзи-подбор, как раньше ----
     emoji_groups = {
         "отнош": "💕", "люб": random.choice(["❤️", "💌", "💐", "🌹", "💞"]),
         "чувств": random.choice(["💖", "💘", "💗"]), "поцел": "😘", "друз": "👫", "объят": "🤗",
@@ -52,25 +54,67 @@ def load_questions_from_csv(path: str):
                 return emo
         return random.choice(neutral_emojis)
 
-    with open(path, "r", encoding="utf-8") as f:
-        reader = csv.DictReader(f, delimiter=';')
-        for row in reader:
-            q = (row.get("question") or "").strip()
-            opts = (row.get("options") or "").strip()
-            qtype = (row.get("type") or "single").strip().lower()
-            if not q or not opts:
-                continue
-            q_emoji = pick_emoji(q)
-            options_raw = [o.strip() for o in opts.split("|") if o.strip()]
-            options = []
-            for o in options_raw:
-                emo = pick_emoji(o)
-                if emo not in o:
-                    o = f"{emo} {o}"
-                options.append(o)
-            out.append({"type": qtype, "question": f"{q_emoji} {q}", "options": options})
-    return out
+    # ---- читаем с авто-детектом кодировки и разделителя ----
+    rows = None
+    dialect = None
+    for enc in ("utf-8", "utf-8-sig", "cp1251"):
+        try:
+            with open(path, "r", encoding=enc, newline="") as f:
+                sample = f.read(2048)
+                f.seek(0)
+                try:
+                    dialect = csv.Sniffer().sniff(sample, delimiters=";,")
+                except csv.Error:
+                    class Dialect(csv.excel):
+                        delimiter = ";"
+                    dialect = Dialect()
+                reader = csv.reader(f, dialect)
+                rows = list(reader)
+                break
+        except UnicodeDecodeError:
+            continue
 
+    if not rows:
+        return []
+
+    # ---- нормализуем заголовки ----
+    header = [h.strip().lower().lstrip("\ufeff") for h in rows[0]]
+
+    def find_idx(candidates):
+        for name in candidates:
+            if name in header:
+                return header.index(name)
+        return None
+
+    qi = find_idx(["question", "вопрос"])
+    oi = find_idx(["options", "варианты", "варианты ответов"])
+    ti = find_idx(["type", "тип"])
+
+    out = []
+    for r in rows[1:]:
+        if not r:
+            continue
+        q = (r[qi] if qi is not None and qi < len(r) else "").strip()
+        opts_field = (r[oi] if oi is not None and oi < len(r) else "").strip()
+        qtype = (r[ti] if ti is not None and ti < len(r) else "single").strip().lower()
+        if not q or not opts_field:
+            continue
+
+        # делим варианты по | ; или , (что бы ни прислала Excel/Numbers/Google)
+        options_raw = [o.strip() for o in re.split(r"\s*\|\s*|\s*;\s*|\s*,\s*", opts_field) if o.strip()]
+
+        # добавляем эмодзи к вопросу и вариантам
+        q_emoji = pick_emoji(q)
+        options = []
+        for o in options_raw:
+            emo = pick_emoji(o)
+            if emo not in o:
+                o = f"{emo} {o}"
+            options.append(o)
+
+        out.append({"type": qtype, "question": f"{q_emoji} {q}", "options": options})
+
+    return out
 questions = load_questions_from_csv(QUESTIONS_PATH)
 
 class Quiz(StatesGroup):
