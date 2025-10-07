@@ -21,18 +21,60 @@ QUESTIONS_JSON = os.getenv("QUESTIONS_JSON", "questions.json")
 SESSIONS_FILE = os.getenv("SESSIONS_FILE", "sessions.json")
 
 def load_questions_from_csv(path: str):
-    if not os.path.exists(path): return []
+    import io, re, csv, os
+
+    if not os.path.exists(path):
+        return []
+
+    # 1) читаем байты и пробуем кодировки
+    raw = open(path, "rb").read()
+    text = None
+    for enc in ("utf-8", "utf-8-sig", "cp1251"):
+        try:
+            text = raw.decode(enc)
+            break
+        except UnicodeDecodeError:
+            continue
+    if text is None:
+        # в крайнем случае заменим битые байты
+        text = raw.decode("utf-8", errors="replace")
+
+    # 2) определяем разделитель по образцу
+    import csv as _csv
+    sample = "\n".join(text.splitlines()[:5])
+    try:
+        dialect = _csv.Sniffer().sniff(sample, delimiters=";,")
+        delimiter = dialect.delimiter
+    except Exception:
+        delimiter = ";" if ";" in sample else ","
+
+    # 3) читаем словарём
+    f = io.StringIO(text)
+    reader = csv.DictReader(f, delimiter=delimiter)
+
     out = []
-    with open(path, "r", encoding="utf-8") as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            q = (row.get("question") or "").strip()
-            opts = (row.get("options") or "").strip()
-            qtype = (row.get("type") or "single").strip().lower()
-            if not q or not opts: continue
-            options = [o.strip() for o in opts.split(";") if o.strip()]
-            if qtype not in ("single","multi"): qtype = "single"
-            out.append({"type": qtype, "question": q, "options": options})
+    for row in reader:
+        # поддерживаем и русские, и английские заголовки
+        q = (row.get("Вопрос") or row.get("question") or "").strip()
+        opts_raw = (
+            row.get("Варианты ответов")
+            or row.get("Ответы")
+            or row.get("options")
+            or ""
+        ).strip()
+        qtype = (row.get("Тип") or row.get("type") or "single").strip().lower()
+        if not q or not opts_raw:
+            continue
+
+        # варианты ответа внутри ячейки: ожидаем ; (если вдруг запятые — тоже поймаем)
+        parts = [p.strip() for p in re.split(r"[;]", opts_raw) if p.strip()]
+        if len(parts) <= 1:
+            parts = [p.strip() for p in re.split(r"[;,]", opts_raw) if p.strip()]
+        if qtype not in ("single", "multi"):
+            qtype = "single"
+
+        out.append({"type": qtype, "question": q, "options": parts})
+
     return out
 
 def load_questions_from_json(path: str):
