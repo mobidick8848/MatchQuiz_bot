@@ -1,94 +1,39 @@
-import csv
+# -*- coding: utf-8 -*-
+# MatchQuiz bot – финальная версия для questions.csv
+# aiogram 3.x webhook mode for Render
+
 import os
-import random
+import csv
 import re
+import random
+from typing import Dict, Any, List, Optional
+from aiohttp import web
 from aiogram import Bot, Dispatcher, F, types
 from aiogram.enums import ParseMode
+from aiogram.client.default import DefaultBotProperties
 from aiogram.filters import CommandStart
 from aiogram.fsm.context import FSMContext
-from aiogram.fsm.state import State, StatesGroup
+from aiogram.fsm.state import StatesGroup, State
 from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.types import Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
-from aiohttp import web
-import json
+from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
 
+# ---------- Конфигурация ----------
+BOT_TOKEN = os.getenv("BOT_TOKEN", "")
+PORT = int(os.getenv("PORT", "10000"))
+WEBHOOK_URL = os.getenv("RENDER_EXTERNAL_URL", "").rstrip("/") + "/webhook"
+QUESTIONS_CSV = os.getenv("QUESTIONS_CSV", "questions.csv")
 
-
-
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-
-from aiogram.client.default import DefaultBotProperties
-
-bot = Bot(
-    token=BOT_TOKEN,
-    default=DefaultBotProperties(parse_mode=ParseMode.HTML)
-)
-dp = Dispatcher(storage=MemoryStorage())
-
-QUESTIONS_PATH = "questions.csv"
-SESSIONS_PATH = "sessions.json"
-
-def load_questions_from_csv(path: str):
-    import csv, re, os, random
-
+# ---------- Загрузка вопросов ----------
+def load_questions_from_csv(path: str) -> List[Dict[str, Any]]:
     if not os.path.exists(path):
         return []
 
-    # автоопределение кодировки
-    for enc in ("utf-8", "utf-8-sig", "cp1251"):
-        try:
-            with open(path, encoding=enc, newline="") as f:
-                reader = csv.DictReader(f, delimiter=";")
-                rows = list(reader)
-                break
-        except Exception:
-            continue
-    else:
-        return []
-
-    out = []
-    for row in rows:
-        q = (row.get("question") or row.get("вопрос") or "").strip()
-        opts_field = (row.get("options") or row.get("варианты ответов") or "").strip()
-        qtype = (row.get("type") or row.get("тип") or "single").strip().lower()
-        if not q or not opts_field or "question" in q.lower():
-            # пропускаем шапку
-            continue
-        # делим варианты по | ; ,
-        options = [o.strip() for o in re.split(r"[|;,]", opts_field) if o.strip()]
-        out.append({"type": qtype, "question": q, "options": options})
-    return out
-
-    # ---- эмодзи-подбор, как раньше ----
-    emoji_groups = {
-        "отнош": "💕", "люб": random.choice(["❤️", "💌", "💐", "🌹", "💞"]),
-        "чувств": random.choice(["💖", "💘", "💗"]), "поцел": "😘", "друз": "👫", "объят": "🤗",
-        "работ": "💼", "офис": "🏢", "началь": "👔", "деньги": "💰", "проект": "📊",
-        "еда": "🍽️", "куш": "🍲", "завтр": "☕", "обед": "🥗", "ужин": "🍝", "коф": "☕", "чай": "🍵",
-        "спорт": "🏃", "бег": "🏃‍♀️", "трен": "💪", "фитнес": "🏋️", "вело": "🚴",
-        "отдых": "🌙", "сон": "😴", "релакс": "🧘",
-        "путеше": "🧳", "поезд": "🚆", "отпуск": "🏖️", "море": "🌊",
-        "живот": "🐶", "кот": "🐱", "собак": "🐕", "питом": "🐾",
-        "хобби": "🎨", "увлеч": "🎯", "музык": "🎵", "фильм": "🎬", "книг": "📚",
-        "юмор": "😂", "шут": "🤣", "смех": "😄"
-    }
-    neutral_emojis = ["💭", "🌟", "🎈", "🎉", "💬", "🎵", "💫", "🌈", "✨"]
-
-    def pick_emoji(text: str) -> str:
-        t_lower = text.lower()
-        for key, emo in emoji_groups.items():
-            if re.search(key, t_lower):
-                return emo
-        return random.choice(neutral_emojis)
-
-    # ---- читаем с авто-детектом кодировки и разделителя ----
     rows = None
-    dialect = None
-    for enc in ("utf-8", "utf-8-sig", "cp1251"):
+    for enc in ("utf-8-sig", "utf-8", "cp1251"):
         try:
             with open(path, "r", encoding=enc, newline="") as f:
-                sample = f.read(2048)
+                sample = f.read(4096)
                 f.seek(0)
                 try:
                     dialect = csv.Sniffer().sniff(sample, delimiters=";,")
@@ -105,13 +50,12 @@ def load_questions_from_csv(path: str):
     if not rows:
         return []
 
-    # ---- нормализуем заголовки ----
     header = [h.strip().lower().lstrip("\ufeff") for h in rows[0]]
 
-    def find_idx(candidates):
-        for name in candidates:
-            if name in header:
-                return header.index(name)
+    def find_idx(cands: List[str]) -> Optional[int]:
+        for c in cands:
+            if c in header:
+                return header.index(c)
         return None
 
     qi = find_idx(["question", "вопрос"])
@@ -125,209 +69,200 @@ def load_questions_from_csv(path: str):
         q = (r[qi] if qi is not None and qi < len(r) else "").strip()
         opts_field = (r[oi] if oi is not None and oi < len(r) else "").strip()
         qtype = (r[ti] if ti is not None and ti < len(r) else "single").strip().lower()
-        if not q or not opts_field:
+
+        if not q or q.lower() in ("question", "вопрос"):
             continue
 
-        # делим варианты по | ; или , (что бы ни прислала Excel/Numbers/Google)
         options_raw = [o.strip() for o in re.split(r"\s*\|\s*|\s*;\s*|\s*,\s*", opts_field) if o.strip()]
+        if not options_raw:
+            continue
 
-        # добавляем эмодзи к вопросу и вариантам
-        q_emoji = pick_emoji(q)
-        options = []
-        for o in options_raw:
-            emo = pick_emoji(o)
-            if emo not in o:
-                o = f"{emo} {o}"
-            options.append(o)
-
-        out.append({"type": qtype, "question": f"{q_emoji} {q}", "options": options})
-
+        out.append({"type": qtype, "question": q, "options": options_raw})
     return out
-questions = load_questions_from_csv(QUESTIONS_PATH)
 
-class Quiz(StatesGroup):
+questions = load_questions_from_csv(QUESTIONS_CSV)
+
+# ---------- Эмодзи ----------
+EMOJIS = ["🌞","☕","🍀","💫","🎯","❤️","💭","🌸","🔥","🎵","✨","🌈","📚","🎁","🌹","🌙","🍷","🤍","💬","🌻"]
+def emojify(text: str, idx: int) -> str:
+    return f"{EMOJIS[idx % len(EMOJIS)]} {text}"
+
+# ---------- Память ----------
+sessions: Dict[str, Dict[str, Any]] = {}
+
+# ---------- Состояния ----------
+class Flow(StatesGroup):
     role = State()
+    name = State()
     code = State()
-    name_a = State()
-    name_b = State()
-    q = State()
+    idx = State()
+    role_key = State()
 
-def load_sessions():
-    if os.path.exists(SESSIONS_PATH):
-        with open(SESSIONS_PATH, "r", encoding="utf-8") as f:
-            return json.load(f)
-    return {}
+# ---------- Бот ----------
+bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
+dp = Dispatcher(storage=MemoryStorage())
 
-def save_sessions(s):
-    with open(SESSIONS_PATH, "w", encoding="utf-8") as f:
-        json.dump(s, f, ensure_ascii=False, indent=2)
+# ---------- Клавиатуры ----------
+def kb_start():
+    b = InlineKeyboardBuilder()
+    b.button(text="🎯 Пройти как первый", callback_data="role:first")
+    b.button(text="💞 Пройти как второй", callback_data="role:second")
+    b.adjust(2)
+    return b.as_markup()
 
-def equal(q, a, b):
-    return a == b
+def kb_answers(qidx: int, options: List[str], code: str, role_key: str):
+    b = InlineKeyboardBuilder()
+    for i, opt in enumerate(options):
+        b.button(text=opt, callback_data=f"ans:{code}:{role_key}:{qidx}:{i}")
+    b.adjust(1)  # по одной кнопке в ряд
+    return b.as_markup()
 
-def opt_text(q, ans):
-    if ans is None:
-        return "—"
-    opts = q["options"]
-    try:
-        idx = int(ans)
-        return opts[idx]
-    except:
-        return str(ans)
+# ---------- Утилиты ----------
+def gen_code() -> str:
+    return f"{random.randint(1000, 9999)}"
 
-@dp.message(CommandStart())
-async def start_cmd(msg: Message, state: FSMContext):
-    kb = InlineKeyboardBuilder()
-    kb.button(text="🎯 Пройти как первый участник", callback_data="first")
-    kb.button(text="💞 Пройти как второй участник", callback_data="second")
-    await msg.answer("Привет! 🥰 Это тест совпадений."
-                     "Один из вас проходит его первым, а второй потом вводит код."
-                     "Кто ты?", reply_markup=kb.as_markup())
+def ensure_session(code: str):
+    if code not in sessions:
+        sessions[code] = {"a": {"name": "", "answers": []},
+                          "b": {"name": "", "answers": []}}
 
-@dp.callback_query(F.data.in_({"first","second"}))
-async def pick_role(call: types.CallbackQuery, state: FSMContext):
-    role = call.data
-    await state.update_data(role=role)
-    if role == "first":
-        code = str(random.randint(1000, 9999))
-        await state.update_data(code=code)
-        await call.message.answer(f"💬 Введи своё имя (код для второго участника: <code>{code}</code>)")
-    else:
-        await call.message.answer("💬 Введи код от первого участника:")
+def calc_result(code: str):
+    s = sessions.get(code, {})
+    a = s.get("a", {})
+    b = s.get("b", {})
+    qa, qb = a.get("answers", []), b.get("answers", [])
+    matches, pairs = 0, []
+    for i in range(min(len(qa), len(qb))):
+        ok = qa[i] == qb[i]
+        if ok:
+            matches += 1
+        pairs.append({
+            "q": questions[i]["question"],
+            "a_opt": questions[i]["options"][qa[i]] if qa[i] < len(questions[i]["options"]) else "",
+            "b_opt": questions[i]["options"][qb[i]] if qb[i] < len(questions[i]["options"]) else "",
+            "ok": ok
+        })
+    pct = int(round(100 * matches / max(1, len(pairs))))
+    return {"a": a.get("name", ""), "b": b.get("name", ""), "matches": matches, "total": len(pairs), "pct": pct, "pairs": pairs}
 
-@dp.message(F.text.regexp(r"^\d{4}$"))
-async def got_code(msg: Message, state: FSMContext):
-    data = await state.get_data()
-    if data.get("role") != "second":
-        return
-    code = msg.text.strip()
-    await state.update_data(code=code)
-    await msg.answer("💬 А теперь введи своё имя:")
-
-@dp.message(F.text)
-async def got_name(msg: Message, state: FSMContext):
-    data = await state.get_data()
-    role = data.get("role")
-    if not role:
-        return
-    if role == "first":
-        await state.update_data(name_a=msg.text.strip(), answers={})
-    else:
-        await state.update_data(name_b=msg.text.strip(), answers={})
-    await ask_question(msg, state, 0)
-
-async def ask_question(msg: Message, state: FSMContext, idx: int):
+async def send_question(chat_id: int, code: str, role_key: str, idx: int):
     if idx >= len(questions):
-        await finish(msg, state)
+        res = calc_result(code)
+        a_done = len(sessions[code]["a"]["answers"]) >= len(questions)
+        b_done = len(sessions[code]["b"]["answers"]) >= len(questions)
+        if a_done and b_done:
+            lines = [f"💞 <b>{res['a']}</b> + <b>{res['b']}</b>",
+                     f"Совпадений: <b>{res['matches']}</b> из {res['total']} — <b>{res['pct']}%</b>"]
+            bad = [p for p in res["pairs"] if not p["ok"]]
+            if bad:
+                lines.append("\n🔍 Где не совпало:")
+                for p in bad[:10]:
+                    lines.append(f"• <b>{p['q']}</b>\n  — {res['a']}: {p['a_opt']}\n  — {res['b']}: {p['b_opt']}")
+            await bot.send_message(chat_id, "\n".join(lines))
+        else:
+            await bot.send_message(chat_id, "👌 Готово! Ждём второго участника…")
         return
 
     q = questions[idx]
+    await bot.send_message(chat_id, f"<b>{emojify(q['question'], idx)}</b>", reply_markup=kb_answers(idx, q["options"], code, role_key))
 
-    # Клавиатура с вариантами – ОДНА кнопка в ряд
-    builder = InlineKeyboardBuilder()
-    for i, opt in enumerate(q["options"]):
-        builder.button(text=opt, callback_data=f"ans_{idx}_{i}")
-    builder.adjust(1)  # ← одна кнопка в строке
+# ---------- Хендлеры ----------
+@dp.message(CommandStart())
+async def on_start(message: types.Message, state: FSMContext):
+    await state.clear()
+    await message.answer("Привет! 🥰 Это тест совпадений. Один из вас проходит первым, другой — вторым. Кто ты?", reply_markup=kb_start())
+    await state.set_state(Flow.role)
 
-    # отправляем сам вопрос + кнопки
-    await msg.answer(
-        f"<b>{q['question']}</b>",
-        reply_markup=builder.as_markup()
-    )
+@dp.callback_query(F.data.startswith("role:"))
+async def choose_role(cb: types.CallbackQuery, state: FSMContext):
+    role = cb.data.split(":")[1]
+    await cb.message.edit_reply_markup(reply_markup=None)
+    if role == "first":
+        await state.update_data(role="first", role_key="a")
+        await cb.message.answer("💬 Введи своё имя:")
+        await state.set_state(Flow.name)
+    else:
+        await state.update_data(role="second", role_key="b")
+        await cb.message.answer("🔢 Введи код пары (4 цифры):")
+        await state.set_state(Flow.code)
+    await cb.answer()
 
-@dp.callback_query(F.data.startswith("ans_"))
-async def answer(call: types.CallbackQuery, state: FSMContext):
-    _, idx, ans = call.data.split("_")
-    idx, ans = int(idx), int(ans)
+@dp.message(Flow.code)
+async def input_code(message: types.Message, state: FSMContext):
+    code = re.sub(r"\D+", "", message.text or "")
+    if len(code) != 4:
+        await message.answer("Код должен состоять из 4 цифр. Попробуй снова 🙂")
+        return
+    ensure_session(code)
+    await state.update_data(code=code)
+    await message.answer("💬 Как тебя зовут?")
+    await state.set_state(Flow.name)
+
+@dp.message(Flow.name)
+async def input_name(message: types.Message, state: FSMContext):
+    name = (message.text or "").strip() or "Без имени"
     data = await state.get_data()
-    answers = data.get("answers", {})
-    answers[str(idx)] = ans
-    await state.update_data(answers=answers)
-    await call.message.edit_reply_markup()
-    await ask_question(call.message, state, idx + 1)
+    role = data.get("role", "first")
+    role_key = data.get("role_key", "a")
 
-async def finish(msg: Message, state: FSMContext):
-    data = await state.get_data()
-    role = data.get("role")
     code = data.get("code")
-    answers = data.get("answers", {})
-    sessions = load_sessions()
+    if role == "first":
+        code = gen_code()
+        await state.update_data(code=code)
+
+    ensure_session(code)
+    sessions[code][role_key]["name"] = name
 
     if role == "first":
-        s = sessions.get(code, {})
-        s["answers_a"] = answers
-        s["name_a"] = data.get("name_a", "")
-        sessions[code] = s
-        save_sessions(sessions)
-        await msg.answer(f"💌 Готово! Отправь этот код второй половинке: <code>{code}</code>")
+        await message.answer(f"🔐 Твой код: <b>{code}</b>\nПередай его второму участнику 💌")
     else:
-        s = sessions.get(code)
-        if not s:
-            await msg.answer("⚠️ Сессия не найдена.")
-            await state.clear()
-            return
-        s["answers_b"] = answers
-        s["name_b"] = data.get("name_b", "")
-        sessions[code] = s
-        save_sessions(sessions)
+        await message.answer(f"✅ Код принят: <b>{code}</b>")
 
-        hits = 0
-        total = len(questions)
-        body_lines = []
+    await send_question(message.chat.id, code, role_key, 0)
+    await state.set_state(Flow.idx)
 
-        for i, q in enumerate(questions):
-            a = s["answers_a"].get(str(i))
-            b = answers.get(str(i))
-            ok = equal(q, a, b)
-            hits += 1 if ok else 0
-            mark = "❤️ Совпало!" if ok else "💔 По-разному"
-            prefix = "💭" if ok else "🤔"
-            body_lines.append(
-                f"{prefix} <b>{q['question']}</b>\n"
-                f"— 💕 {s.get('name_a', 'Первый')}: {opt_text(q, a)}\n"
-                f"— 💙 {s.get('name_b', 'Второй')}: {opt_text(q, b)}\n"
-                f"{mark}\n"
-            )
+@dp.callback_query(F.data.startswith("ans:"))
+async def on_answer(cb: types.CallbackQuery, state: FSMContext):
+    try:
+        _, code, role_key, qidx, opt_idx = cb.data.split(":")
+        qidx, opt_idx = int(qidx), int(opt_idx)
+    except Exception:
+        await cb.answer()
+        return
 
-        percent = int((hits / total) * 100) if total > 0 else 0
+    ensure_session(code)
+    answers = sessions[code][role_key]["answers"]
+    if len(answers) == qidx:
+        answers.append(opt_idx)
+    elif len(answers) > qidx:
+        answers[qidx] = opt_idx
 
-        if percent >= 85:
-            emotional = "🌹 Ваша эмоциональная близость почти идеальна — вы чувствуете друг друга без слов 💞"
-        elif percent >= 60:
-            emotional = "💖 Между вами хорошая эмоциональная связь — вы понимаете друг друга даже в тишине 😊"
-        elif percent >= 40:
-            emotional = "💫 Есть отклик, но вы ещё изучаете внутренний мир друг друга 🌙"
-        else:
-            emotional = "💔 Пока близость хрупкая, но искренность может всё изменить 🌱"
+    await cb.message.edit_reply_markup(reply_markup=None)
+    await cb.answer("✅")
 
-        if percent >= 85:
-            summary_line = f"💞 Совместимость: <b>{percent}%</b> — вы просто созданы друг для друга! 🌹"
-        elif percent >= 60:
-            summary_line = f"💖 Совместимость: <b>{percent}%</b> — отличная пара, различия только украшают 😄"
-        elif percent >= 40:
-            summary_line = f"💫 Совместимость: <b>{percent}%</b> — неплохо, но вы разные — и это интересно 😉"
-        else:
-            summary_line = f"💔 Совместимость: <b>{percent}%</b> — противоположности притягиваются 😅"
+    await send_question(cb.message.chat.id, code, role_key, qidx + 1)
 
-        header = "🥰 <b>Вот что получилось!</b>\nПосмотрим, как совпадают ваши ответы и насколько вы на одной волне 💫\n\n"
-        summary = f"{summary_line}\n{emotional}\n\n❤️ Совпадений: <b>{hits}</b> из <b>{total}</b>\n\n"
-        text = header + summary + "\n".join(body_lines)
+# ---------- Webhook ----------
+async def on_startup(bot: Bot):
+    try:
+        await bot.set_webhook(WEBHOOK_URL, drop_pending_updates=True)
+    except Exception:
+        pass
 
-        for chunk in [text[i:i+3500] for i in range(0, len(text), 3500)]:
-            await msg.answer(chunk, parse_mode="HTML")
+async def on_shutdown(bot: Bot):
+    try:
+        await bot.delete_webhook()
+    except Exception:
+        pass
 
-    await state.clear()
-
-async def handle(request):
-    body = await request.json()
-    await dp.feed_update(bot, types.Update(**body))
-    return web.Response()
-
-app = web.Application()
-app.router.add_post("/webhook", handle)
-
-async def on_startup(_):
-    await bot.set_webhook(os.getenv("RENDER_EXTERNAL_URL") + "/webhook")
+def build_app() -> web.Application:
+    app = web.Application()
+    dp.startup.register(on_startup)
+    dp.shutdown.register(on_shutdown)
+    SimpleRequestHandler(dispatcher=dp, bot=bot).register(app, path="/webhook")
+    setup_application(app, dp, bot=bot)
+    return app
 
 if __name__ == "__main__":
-    web.run_app(app, host="0.0.0.0", port=int(os.getenv("PORT", 10000)))
+    app = build_app()
+    web.run_app(app, host="0.0.0.0", port=PORT)
