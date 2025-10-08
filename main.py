@@ -9,9 +9,23 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import Message
-from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiohttp import web
 import json
+from aiogram.utils.keyboard import InlineKeyboardBuilder
+
+builder = InlineKeyboardBuilder()
+for opt in question["options"]:
+    builder.button(text=opt, callback_data=opt)
+
+# 👇 Кнопки будут идти строго по одной в ряд
+builder.adjust(1)
+
+await message.answer(
+    text=question["question"],
+    reply_markup=builder.as_markup()
+)
+
+
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 
@@ -31,6 +45,31 @@ def load_questions_from_csv(path: str):
 
     if not os.path.exists(path):
         return []
+
+    # автоопределение кодировки
+    for enc in ("utf-8", "utf-8-sig", "cp1251"):
+        try:
+            with open(path, encoding=enc, newline="") as f:
+                reader = csv.DictReader(f, delimiter=";")
+                rows = list(reader)
+                break
+        except Exception:
+            continue
+    else:
+        return []
+
+    out = []
+    for row in rows:
+        q = (row.get("question") or row.get("вопрос") or "").strip()
+        opts_field = (row.get("options") or row.get("варианты ответов") or "").strip()
+        qtype = (row.get("type") or row.get("тип") or "single").strip().lower()
+        if not q or not opts_field or "question" in q.lower():
+            # пропускаем шапку
+            continue
+        # делим варианты по | ; ,
+        options = [o.strip() for o in re.split(r"[|;,]", opts_field) if o.strip()]
+        out.append({"type": qtype, "question": q, "options": options})
+    return out
 
     # ---- эмодзи-подбор, как раньше ----
     emoji_groups = {
