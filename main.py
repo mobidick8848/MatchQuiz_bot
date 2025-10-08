@@ -11,7 +11,7 @@ from aiohttp import web
 from aiogram import Bot, Dispatcher, F, types
 from aiogram.enums import ParseMode
 from aiogram.client.default import DefaultBotProperties
-from aiogram.filters import CommandStart
+from aiogram.filters.command import CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
 from aiogram.fsm.storage.memory import MemoryStorage
