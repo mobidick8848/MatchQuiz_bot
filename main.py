@@ -9,21 +9,10 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import Message
+from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiohttp import web
 import json
-from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-builder = InlineKeyboardBuilder()
-for opt in question["options"]:
-    builder.button(text=opt, callback_data=opt)
-
-# 👇 Кнопки будут идти строго по одной в ряд
-builder.adjust(1)
-
-await message.answer(
-    text=question["question"],
-    reply_markup=builder.as_markup()
-)
 
 
 
@@ -231,11 +220,20 @@ async def ask_question(msg: Message, state: FSMContext, idx: int):
     if idx >= len(questions):
         await finish(msg, state)
         return
+
     q = questions[idx]
-    kb = InlineKeyboardBuilder()
+
+    # Клавиатура с вариантами – ОДНА кнопка в ряд
+    builder = InlineKeyboardBuilder()
     for i, opt in enumerate(q["options"]):
-        kb.button(text=opt, callback_data=f"ans_{idx}_{i}")
-    await msg.answer(f"<b>{q['question']}</b>", reply_markup=kb.as_markup())
+        builder.button(text=opt, callback_data=f"ans_{idx}_{i}")
+    builder.adjust(1)  # ← одна кнопка в строке
+
+    # отправляем сам вопрос + кнопки
+    await msg.answer(
+        f"<b>{q['question']}</b>",
+        reply_markup=builder.as_markup()
+    )
 
 @dp.callback_query(F.data.startswith("ans_"))
 async def answer(call: types.CallbackQuery, state: FSMContext):
