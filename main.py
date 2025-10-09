@@ -288,7 +288,7 @@ def build_app() -> web.Application:
 from aiogram import Bot
 import asyncio
 
-WEBHOOK_URL = https://matchquiz-bot.onrender.com  # вставь сюда свой URL на Render
+WEBHOOK_URL = "https://matchquiz-bot.onrender.com"  # вставь сюда свой URL на Render
 
 async def on_startup(bot: Bot):
     await bot.set_webhook(WEBHOOK_URL)
