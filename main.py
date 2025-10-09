@@ -285,6 +285,23 @@ def build_app() -> web.Application:
     setup_application(app, dp, bot=bot)
     return app
 
+from aiogram import Bot
+import asyncio
+
+WEBHOOK_URL = "https://matchquiz-bot.onrender.com"  # вставь сюда свой URL на Render
+
+async def on_startup(bot: Bot):
+    await bot.set_webhook(WEBHOOK_URL)
+    print(f"Webhook set to {WEBHOOK_URL}")
+
+async def main():
+    bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
+    dp = Dispatcher(storage=MemoryStorage())
+
+    dp.include_router(router)
+
+    await on_startup(bot)
+    await dp.start_polling(bot)
+
 if __name__ == "__main__":
-    app = build_app()
-    web.run_app(app, host="0.0.0.0", port=PORT)
+    asyncio.run(main())
