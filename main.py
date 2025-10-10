@@ -150,7 +150,8 @@ async def ask_question(message, state, session, code, role_key, index):
         kb.button(text=opt, callback_data=f"answer:{index}:{opt}")
     kb.adjust(1)
 
-    await message.answer(f"🌀 Вопрос {index+1}/{len(questions)}:<b>{question_text}</b>",
+    await message.answer(
+        f"🌀 Вопрос {index+1}/{len(questions)}:<b>{question_text}</b>",
         reply_markup=kb.as_markup(),
         parse_mode="HTML"
     )
