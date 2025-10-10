@@ -123,6 +123,22 @@ async def finish_quiz(message: types.Message, state: FSMContext, session, code, 
 
     await message.answer("\n".join(result), parse_mode="HTML")
 
+# ---------- Обработка ролей ----------
+
+@dp.callback_query(F.data.startswith("role:"))
+async def role_handler(callback: types.CallbackQuery, state: FSMContext):
+    role = callback.data.split(":")[1]
+    await callback.message.edit_reply_markup(reply_markup=None)
+
+    if role == "first":
+        await state.update_data(role="first", role_key="a")
+        await callback.message.answer("💬 Введи своё имя (код для второго участника появится позже)")
+        await state.set_state(Flow.name)
+    else:
+        await state.update_data(role="second", role_key="b")
+        await callback.message.answer("💞 Введи код пары (4 цифры):")
+        await state.set_state(Flow.code)
+
 # ---------- Старт ----------
 
 async def start_handler(message: types.Message, state: FSMContext):
@@ -161,7 +177,10 @@ def build_app() -> web.Application:
     app = web.Application()
     dp = Dispatcher(storage=MemoryStorage())
     bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
-    dp.message.register(start_handler, CommandStart())
+
+    dp.message.register(start_handler, CommandStart())  # реакция на /start
+    dp.callback_query.register(role_handler, F.data.startswith("role:"))  # обработка кнопок
+
     dp.startup.register(on_startup)
     dp.shutdown.register(on_shutdown)
     SimpleRequestHandler(dispatcher=dp, bot=bot).register(app, path="/webhook")
