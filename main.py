@@ -130,8 +130,7 @@ async def input_name(message: types.Message, state: FSMContext):
 
     session[role_key]["name"] = name
     session[role_key]["answers"] = []
-    await message.answer(f"Отлично, {name}! 🚀 Поехали!
-")
+    await message.answer(f"Отлично, {name}! 🚀 Поехали!")
 
     await ask_question(message, state, session, code, role_key, 0)
 
