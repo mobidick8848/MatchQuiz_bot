@@ -123,6 +123,20 @@ async def finish_quiz(message: types.Message, state: FSMContext, session, code, 
 
     await message.answer("\n".join(result), parse_mode="HTML")
 
+# ---------- Старт ----------
+
+async def start_handler(message: types.Message, state: FSMContext):
+    kb = types.InlineKeyboardMarkup(inline_keyboard=[[
+        types.InlineKeyboardButton(text="🎯 Пройти как первый", callback_data="role:first"),
+        types.InlineKeyboardButton(text="💞 Пройти как второй", callback_data="role:second")
+    ]])
+    await message.answer(
+        "Привет! 🥰 Это тест совпадений. Один из вас проходит его первым, "
+        "а второй потом вводит код. Кто ты?",
+        reply_markup=kb
+    )
+    await state.set_state(Flow.role)
+
 async def on_startup(bot: Bot):
     try:
         info = await bot.get_webhook_info()
@@ -147,6 +161,7 @@ def build_app() -> web.Application:
     app = web.Application()
     dp = Dispatcher(storage=MemoryStorage())
     bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
+    dp.message.register(start_handler, CommandStart())
     dp.startup.register(on_startup)
     dp.shutdown.register(on_shutdown)
     SimpleRequestHandler(dispatcher=dp, bot=bot).register(app, path="/webhook")
