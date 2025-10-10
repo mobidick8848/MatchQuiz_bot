@@ -198,18 +198,21 @@ async def finish_quiz(message, state, session, code, role_key):
     else:
         text = "🌀 Вы противоположности, но именно это делает вас интересными 💫"
 
-    result = [f"<b>Результаты теста совпадений:</b>
-Совпадений: {same} из {total} ({percent}%)", text, "
-<b>Подробности:</b>"]
+    result = [
+        "<b>Результаты теста совпадений:</b>"
+        f"Совпадений: {same} из {total} ({percent}%)", 
+        text,
+        "<b>Подробности:</b>"
+    ]
 
     for i, q in enumerate(qs):
-        result.append(f"
-<b>{i+1}. {q['question']}</b>
-— {a['name']}: {qa[i] if i < len(qa) else '—'}
-— {b['name']}: {qb[i] if i < len(qb) else '—'}")
+        result.append(
+            f"<b>{i+1}. {q['question']}</b>\n"
+            f"— {a['name']}: {qa[i] if i < len(qa) else '—'}\n"
+            f"— {b['name']}: {qb[i] if i < len(qb) else '—'}"
+        )
 
-    await message.answer("
-".join(result), parse_mode="HTML")
+    await message.answer("\n".join(result), parse_mode="HTML")
 
 
 # ---------- Запуск ----------
