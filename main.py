@@ -83,8 +83,7 @@ async def send_question(message: types.Message, index: int, state: FSMContext):
         kb.button(text=opt, callback_data=f"answer:{index}:{opt}")
     kb.adjust(1)
     await message.answer(
-        f"📘 Вопрос {index + 1}/{len(questions)}:
-<b>{question_text}</b>",
+        f"📘 Вопрос {index + 1}/{len(questions)}:<b>{question_text}</b>",
         reply_markup=kb.as_markup(),
         parse_mode="HTML",
     )
@@ -117,10 +116,8 @@ async def finish_quiz(message: types.Message, state: FSMContext, session, code, 
     ]
     for i, q in enumerate(qs):
         result.append(
-            f"<b>{i + 1}. {q['question']}</b>
-"
-            f"— 💬 {session['a']['name']}: {qa[i] if i < len(qa) else '—'}
-"
+            f"<b>{i + 1}. {q['question']}</b>"
+            f"— 💬 {session['a']['name']}: {qa[i] if i < len(qa) else '—'}"
             f"— 💬 {session['b']['name']}: {qb[i] if i < len(qb) else '—'}"
         )
 
